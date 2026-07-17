@@ -1,0 +1,5 @@
+name: vertex-anthropic-provider
+kind: model-provider
+version: 1.0.0
+description: Anthropic Claude on Google Vertex AI (Anthropic Messages API, OAuth2/ADC)
+author: Hermes Agent

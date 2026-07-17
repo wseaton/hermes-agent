@@ -452,6 +452,10 @@ def init_agent(
     elif (provider_name is None) and agent._base_url_hostname == "api.x.ai":
         agent.api_mode = "codex_responses"
         agent.provider = "xai"
+    elif agent.provider == "vertex-anthropic":
+        # Claude on Vertex AI — Anthropic Messages API via the SDK's
+        # AnthropicVertex client (rawPredict surface). Not OpenAI-wire.
+        agent.api_mode = "anthropic_messages"
     elif agent.provider == "anthropic" or (provider_name is None and agent._base_url_hostname == "api.anthropic.com"):
         agent.api_mode = "anthropic_messages"
         agent.provider = "anthropic"
@@ -775,7 +779,31 @@ def init_agent(
         # Bedrock + Claude → use AnthropicBedrock SDK for full feature parity
         # (prompt caching, thinking budgets, adaptive thinking).
         _is_bedrock_anthropic = agent.provider == "bedrock"
-        if _is_bedrock_anthropic:
+        _is_vertex_anthropic = agent.provider == "vertex-anthropic"
+        if _is_vertex_anthropic:
+            # Claude on Vertex AI → AnthropicVertex SDK client. project_id +
+            # region are re-resolved here (from config.yaml vertex: + env / ADC)
+            # exactly as the Bedrock branch re-derives its region — the
+            # resolution is cheap and keeps init self-contained. The live
+            # google-auth Credentials object is handed to the SDK so it
+            # refreshes the OAuth bearer per request.
+            from agent.anthropic_adapter import build_anthropic_vertex_client
+            from agent.vertex_adapter import resolve_vertex_anthropic_params
+            _vx_creds, _vx_project, _vx_region = resolve_vertex_anthropic_params()
+            agent._vertex_region = _vx_region
+            agent._vertex_project_id = _vx_project
+            agent._anthropic_client = build_anthropic_vertex_client(
+                _vx_project, _vx_region, credentials=_vx_creds
+            )
+            agent._anthropic_api_key = "adc"
+            agent._anthropic_base_url = base_url
+            agent._is_anthropic_oauth = False
+            agent.api_key = "adc"
+            agent.client = None
+            agent._client_kwargs = {}
+            if not agent.quiet_mode:
+                print(f"🤖 AI Agent initialized with model: {agent.model} (Vertex AI + AnthropicVertex SDK, {_vx_region}, project {_vx_project})")
+        elif _is_bedrock_anthropic:
             from agent.anthropic_adapter import build_anthropic_bedrock_client
             _region_match = re.search(r"bedrock-runtime\.([a-z0-9-]+)\.", base_url or "")
             _br_region = _region_match.group(1) if _region_match else "us-east-1"

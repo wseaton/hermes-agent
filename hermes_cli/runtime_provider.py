@@ -1609,6 +1609,49 @@ def resolve_runtime_provider(
             "requested_provider": requested_provider,
         }
 
+    # Claude on Vertex AI: same ADC/OAuth2 credential path as the Gemini
+    # ``vertex`` provider above, but Claude speaks the Anthropic Messages API
+    # at Vertex's ``publishers/anthropic/models/*:rawPredict`` surface (NOT the
+    # OpenAI-compatible openapi endpoint). Route to the anthropic_messages
+    # transport backed by the SDK's AnthropicVertex client (built in
+    # agent_init from the resolved project_id + region). Mirrors the
+    # Claude-on-Bedrock branch's ``bedrock_anthropic`` signal. The client mints
+    # its own OAuth token via google-auth, so ``api_key`` is a sentinel here.
+    if requested_provider in (
+        "vertex-anthropic",
+        "vertex-claude",
+        "anthropic-vertex",
+        "claude-vertex",
+    ):
+        from agent.vertex_adapter import resolve_vertex_anthropic_params
+
+        try:
+            _creds, project_id, region = resolve_vertex_anthropic_params()
+        except Exception as exc:
+            raise AuthError(
+                "Vertex AI (Anthropic) credentials could not be resolved. "
+                "Claude-on-Vertex uses OAuth2 (not a static API key): provide a "
+                "service-account JSON via GOOGLE_APPLICATION_CREDENTIALS (or "
+                "VERTEX_CREDENTIALS_PATH) in ~/.hermes/.env, or run 'gcloud auth "
+                "application-default login' for ADC. Set the GCP project/region "
+                "under vertex: in config.yaml if they aren't embedded in the "
+                f"credentials. Original error: {exc}"
+            ) from exc
+        return {
+            "provider": "vertex-anthropic",
+            "api_mode": "anthropic_messages",
+            "base_url": (
+                f"https://{region}-aiplatform.googleapis.com/v1/projects/"
+                f"{project_id}/locations/{region}/publishers/anthropic/models"
+            ),
+            "api_key": "adc",
+            "source": "vertex-anthropic-oauth",
+            "region": region,
+            "project_id": project_id,
+            "vertex_anthropic": True,  # Signal to use AnthropicVertex client
+            "requested_provider": requested_provider,
+        }
+
     custom_runtime = _resolve_named_custom_runtime(
         requested_provider=requested_provider,
         explicit_api_key=explicit_api_key,

@@ -875,6 +875,53 @@ def build_anthropic_bedrock_client(region: str):
     )
 
 
+def build_anthropic_vertex_client(project_id: str, region: str, credentials=None):
+    """Create an AnthropicVertex client for Claude models on Google Vertex AI.
+
+    Uses the Anthropic SDK's native Vertex adapter, which speaks the Anthropic
+    Messages API against Vertex's ``publishers/anthropic/models/*:rawPredict``
+    surface and mints/refreshes OAuth tokens via google-auth. This gives full
+    Claude feature parity (prompt caching, thinking budgets, adaptive thinking)
+    exactly like the Bedrock path — the shared anthropic_messages transport
+    calls the same ``.messages.create()`` / ``.messages.stream()`` regardless
+    of which SDK client variant it holds.
+
+    Pass the live google-auth ``credentials`` object (not a static token) so
+    the SDK refreshes the bearer per request; when None, AnthropicVertex falls
+    back to ``google.auth.default()`` (ADC) internally.
+
+    The 1M-context beta is intentionally NOT attached here (unlike Bedrock):
+    it is not broadly enabled for Claude on Vertex and an unrecognized value
+    risks a 400 on some regions. Add it behind a config flag if a project has
+    the 1M window provisioned.
+    """
+    _anthropic_sdk = _get_anthropic_sdk()
+    if _anthropic_sdk is None:
+        raise ImportError(
+            "The 'anthropic' package is required for the Vertex provider. "
+            "Install it with: pip install 'anthropic>=0.69.0'"
+        )
+    if not hasattr(_anthropic_sdk, "AnthropicVertex"):
+        raise ImportError(
+            "anthropic.AnthropicVertex not available. "
+            "Upgrade with: pip install 'anthropic>=0.69.0'"
+        )
+    from httpx import Timeout
+
+    kwargs: Dict[str, Any] = dict(
+        project_id=project_id,
+        region=region,
+        timeout=Timeout(timeout=900.0, connect=10.0),
+        # Delegate retry to hermes's outer loop (honors Retry-After); the SDK
+        # default max_retries=2 ignores it and double-retries. (#26293)
+        max_retries=0,
+        default_headers={"anthropic-beta": ",".join(_COMMON_BETAS)},
+    )
+    if credentials is not None:
+        kwargs["credentials"] = credentials
+    return _anthropic_sdk.AnthropicVertex(**kwargs)
+
+
 def _read_claude_code_credentials_from_keychain() -> Optional[Dict[str, Any]]:
     """Read Claude Code OAuth credentials from the macOS Keychain.
 

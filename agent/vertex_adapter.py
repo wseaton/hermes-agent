@@ -213,6 +213,47 @@ def get_vertex_config(
     return token, base_url
 
 
+def resolve_vertex_anthropic_params(
+    credentials_path: Optional[str] = None,
+    region: Optional[str] = None,
+) -> Tuple[object, str, str]:
+    """Resolve (google Credentials, project_id, region) for Claude-on-Vertex.
+
+    Unlike ``get_vertex_config`` (which returns a bare access-token string for
+    the OpenAI-compatible Gemini surface), the Anthropic ``AnthropicVertex``
+    client wants the *live* google-auth Credentials object so it can refresh
+    the OAuth token itself per request — matching how the native Anthropic
+    client refreshes callable token providers. project_id and region build the
+    Vertex ``publishers/anthropic`` rawPredict endpoint the SDK targets.
+
+    Reuses ``get_vertex_credentials`` for the multiplex-safe credential scoping
+    (see the scope notes there) and its 5-minute-margin refresh cache, then
+    pulls the cached Credentials object back out for the caller.
+
+    Raises RuntimeError when credentials can't be resolved.
+    """
+    if google is None:
+        raise RuntimeError(
+            "google-auth is not installed. Install the extra with: "
+            "pip install 'hermes-agent[vertex]'."
+        )
+    # Populate the cache + validate we can mint a token, and get the project_id.
+    token, project_id = get_vertex_credentials(credentials_path)
+    if not token or not project_id:
+        raise RuntimeError(
+            "Vertex AI credentials could not be resolved. Provide a "
+            "service-account JSON via GOOGLE_APPLICATION_CREDENTIALS (or "
+            "VERTEX_CREDENTIALS_PATH), or run 'gcloud auth application-default "
+            "login' for ADC. Set the GCP project/region under vertex: in "
+            "config.yaml if they aren't embedded in the credentials."
+        )
+    resolved_path = _resolve_credentials_path(credentials_path)
+    cache_key = resolved_path or "__adc__"
+    cached = _creds_cache.get(cache_key)
+    creds = cached[0] if cached else None
+    return creds, project_id, _resolve_region(region)
+
+
 def has_vertex_credentials() -> bool:
     """Fast check for whether Vertex credentials appear configured.
 
