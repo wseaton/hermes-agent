@@ -789,6 +789,10 @@ def init_agent(
             # refreshes the OAuth bearer per request.
             from agent.anthropic_adapter import build_anthropic_vertex_client
             from agent.vertex_adapter import resolve_vertex_anthropic_params
+            # Vertex serves bare Claude model IDs; hermes variant suffixes like
+            # "[1m]"/":1m" 400 as INVALID_ARGUMENT there. Strip them — 1M
+            # context is native on current-gen Claude via Vertex, no beta.
+            agent.model = re.sub(r"(\[[^\]]+\]|:1m|:fast)+$", "", agent.model)
             _vx_creds, _vx_project, _vx_region = resolve_vertex_anthropic_params()
             agent._vertex_region = _vx_region
             agent._vertex_project_id = _vx_project
