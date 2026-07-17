@@ -7616,6 +7616,40 @@ class TestAnthropicInterruptHandler:
         assert "anthropic_messages" in source, \
             "interruptible_streaming_api_call must handle Anthropic interrupt"
 
+    def test_rebuild_preserves_vertex_transport(self, agent):
+        """An interrupted Vertex session must rebuild AnthropicVertex.
+
+        Rebuilding it as a generic Anthropic client uses the informational
+        Vertex models URL as an API base and poisons every subsequent turn
+        with an HTML HTTP 404 response.
+        """
+        credentials = object()
+        vertex_client = object()
+        agent.provider = "vertex-anthropic"
+        agent._vertex_region = "global"
+
+        with (
+            patch(
+                "agent.vertex_adapter.resolve_vertex_anthropic_params",
+                return_value=(credentials, "test-project", "global"),
+            ) as resolve,
+            patch(
+                "agent.anthropic_adapter.build_anthropic_vertex_client",
+                return_value=vertex_client,
+            ) as build_vertex,
+            patch("agent.anthropic_adapter.build_anthropic_client") as build_generic,
+        ):
+            agent._rebuild_anthropic_client()
+
+        resolve.assert_called_once_with(region="global")
+        build_vertex.assert_called_once_with(
+            "test-project", "global", credentials=credentials,
+        )
+        build_generic.assert_not_called()
+        assert agent._anthropic_client is vertex_client
+        assert agent._vertex_project_id == "test-project"
+        assert agent._vertex_region == "global"
+
 
 # ---------------------------------------------------------------------------
 # Bugfix: stream_callback forwarding for non-streaming providers

@@ -5047,6 +5047,58 @@ def resolve_provider_client(
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode
                 else (client, final_model))
 
+    # ── Claude on Google Vertex AI ───────────────────────────────────
+    # Provider profiles with non-api-key auth types are intentionally not
+    # copied into PROVIDER_REGISTRY, so handle this native-SDK route before
+    # that registry lookup. Treating it as the generic Vertex/Gemini OpenAI
+    # endpoint makes title generation and compression unavailable (or routes
+    # Claude to the wrong wire protocol).
+    if provider == "vertex-anthropic":
+        try:
+            from agent.anthropic_adapter import build_anthropic_vertex_client
+            from agent.vertex_adapter import resolve_vertex_anthropic_params
+
+            credentials, project_id, region = resolve_vertex_anthropic_params()
+            real_client = build_anthropic_vertex_client(
+                project_id, region, credentials=credentials,
+            )
+        except (ImportError, RuntimeError) as exc:
+            logger.warning(
+                "resolve_provider_client: cannot create Vertex Anthropic "
+                "client: %s", exc,
+            )
+            return None, None
+
+        final_model = _normalize_resolved_model(
+            model or "claude-opus-4-6", provider,
+        )
+        host = (
+            "aiplatform.googleapis.com"
+            if region == "global"
+            else f"{region}-aiplatform.googleapis.com"
+        )
+        base_url = (
+            f"https://{host}/v1/projects/{project_id}/locations/{region}/"
+            "publishers/anthropic/models"
+        )
+        client = AnthropicAuxiliaryClient(
+            real_client,
+            final_model,
+            api_key="adc",
+            base_url=base_url,
+            is_oauth=False,
+        )
+        logger.debug(
+            "resolve_provider_client: vertex-anthropic (%s, %s)",
+            final_model,
+            region,
+        )
+        return (
+            _to_async_client(client, final_model, is_vision=is_vision)
+            if async_mode
+            else (client, final_model)
+        )
+
     # ── API-key providers from PROVIDER_REGISTRY ─────────────────────
     try:
         from hermes_cli.auth import (

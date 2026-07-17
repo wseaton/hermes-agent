@@ -4659,10 +4659,11 @@ class AIAgent:
     def _rebuild_anthropic_client(self) -> None:
         """Rebuild the Anthropic client after an interrupt or stale call.
 
-        Handles both direct Anthropic and Bedrock-hosted Anthropic models
-        correctly — rebuilding with the Bedrock SDK when provider is bedrock,
-        rather than always falling back to build_anthropic_client() which
-        requires a direct Anthropic API key.
+        Handles direct Anthropic, Bedrock-hosted, and Vertex-hosted Anthropic
+        models correctly. Provider SDK clients must be rebuilt with their
+        original transport; treating Vertex as a generic Anthropic endpoint
+        turns its diagnostic ``.../publishers/anthropic/models`` URL into the
+        API base and makes every request after an interrupt fail with HTTP 404.
 
         Honors ``self._oauth_1m_beta_disabled`` (set by the reactive recovery
         path when an OAuth subscription rejects the 1M-context beta) so the
@@ -4673,6 +4674,18 @@ class AIAgent:
             from agent.anthropic_adapter import build_anthropic_bedrock_client
             region = getattr(self, "_bedrock_region", "us-east-1") or "us-east-1"
             self._anthropic_client = build_anthropic_bedrock_client(region)
+        elif getattr(self, "provider", None) == "vertex-anthropic":
+            from agent.anthropic_adapter import build_anthropic_vertex_client
+            from agent.vertex_adapter import resolve_vertex_anthropic_params
+
+            credentials, project_id, region = resolve_vertex_anthropic_params(
+                region=getattr(self, "_vertex_region", None),
+            )
+            self._vertex_project_id = project_id
+            self._vertex_region = region
+            self._anthropic_client = build_anthropic_vertex_client(
+                project_id, region, credentials=credentials,
+            )
         else:
             from agent.anthropic_adapter import build_anthropic_client
             self._anthropic_client = build_anthropic_client(

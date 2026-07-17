@@ -1637,11 +1637,16 @@ def resolve_runtime_provider(
                 "under vertex: in config.yaml if they aren't embedded in the "
                 f"credentials. Original error: {exc}"
             ) from exc
+        host = (
+            "aiplatform.googleapis.com"
+            if region == "global"
+            else f"{region}-aiplatform.googleapis.com"
+        )
         return {
             "provider": "vertex-anthropic",
             "api_mode": "anthropic_messages",
             "base_url": (
-                f"https://{region}-aiplatform.googleapis.com/v1/projects/"
+                f"https://{host}/v1/projects/"
                 f"{project_id}/locations/{region}/publishers/anthropic/models"
             ),
             "api_key": "adc",
